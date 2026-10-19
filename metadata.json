@@ -1,0 +1,6 @@
+{
+  "name": "Awwwards GSAP ScrollTrigger Showcase",
+  "description": "Metamundo Motion — Google Flow Panoramic Glass & 3D Blockchain Tower interactive web experience with 4K video previsualizations and kinetic GSAP animations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,256 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  h1, h2, h3, .font-syne {
+    font-family: 'Syne', sans-serif;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Smooth custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #090a0f;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #262938;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f445e;
+}
+
+/* GPU acceleration helper classes */
+.gpu-layer {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+  will-change: transform, opacity;
+}
+
+.text-clip-mask {
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 0% 100%);
+}
+
+.noise-bg {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* LAYER 4: Dynamic Clip-Path Mask, Soft Slanted Cut & Sliding Door Reveal */
+.carousel-card {
+  position: relative;
+  isolation: isolate;
+  --carousel-card-blur: 10px;
+  clip-path: polygon(
+    0 0, 100% 0, 100% 100%, 0 100%
+  );
+  transition: clip-path 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+  will-change: clip-path, transform;
+}
+
+/* LAYER 7: Glassmorphism (Cristal Esmerilado) con Blur Dinámico en Scroll */
+.carousel-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  backdrop-filter: blur(var(--carousel-card-blur, 10px));
+  -webkit-backdrop-filter: blur(var(--carousel-card-blur, 10px));
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: inherit;
+  z-index: -1;
+  transition: backdrop-filter 0.6s ease-out, -webkit-backdrop-filter 0.6s ease-out, background 0.6s ease-out;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  pointer-events: none;
+}
+
+.carousel-card.active::before {
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Fallback para navegadores viejos (sin soporte backdrop-filter) */
+@supports not (backdrop-filter: blur(10px)) {
+  .carousel-card::before {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+}
+
+.carousel-card.active {
+  clip-path: polygon(
+    0 5%, 5% 0, 95% 0, 100% 5%,
+    100% 95%, 95% 100%, 5% 100%, 0 95%
+  );
+}
+
+.carousel-card:hover {
+  clip-path: polygon(
+    0 5%, 5% 0, 95% 0, 100% 5%,
+    100% 95%, 95% 100%, 5% 100%, 0 95%
+  );
+}
+
+/* Guard: Videos maintain proper aspect and never distort or get clipped badly */
+.carousel-card video {
+  object-fit: cover;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+/* DECORATIVE ORGANIC MORPH SHAPE: Fluid SVG deformation across cards */
+.morph-shape {
+  pointer-events: none !important;
+  overflow: visible !important;
+  will-change: transform;
+}
+
+.morph-shape path {
+  transition: fill 0.4s ease, stroke 0.4s ease;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Fallback para low-end (sin clip-path, sin blur) y accesibilidad */
+@media (prefers-reduced-motion: reduce) {
+  .carousel-card,
+  .carousel-card.active,
+  .carousel-card:hover {
+    clip-path: none !important;
+    transition: none !important;
+  }
+  .carousel-card::before,
+  .carousel-card.active::before {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    transition: none !important;
+  }
+}
+
+.low-end .carousel-card,
+.low-end .carousel-card.active,
+.low-end .carousel-card:hover,
+.no-clip-path .carousel-card,
+.no-clip-path .carousel-card.active,
+.no-clip-path .carousel-card:hover {
+  clip-path: none !important;
+  transition: none !important;
+}
+
+.low-end .carousel-card::before,
+.low-end .carousel-card.active::before,
+.no-backdrop-filter .carousel-card::before {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: rgba(12, 18, 34, 0.88) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+}
+
+.low-end #horizontal-stream-section article {
+  background-color: rgba(6, 16, 29, 0.96);
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.low-end .hero-molten-title-wrap [class*="blur-"] {
+  filter: none !important;
+}
+
+.low-end .hero-molten-title-wrap h1,
+.low-end .hero-molten-title-wrap h2 {
+  filter: none !important;
+}
+
+@supports not (clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%)) {
+  .carousel-card,
+  .carousel-card.active,
+  .carousel-card:hover {
+    clip-path: none !important;
+  }
+}
+
+.clip-path-card {
+  /* Initial state: Soft chamfered / slanted cuts on opposite diagonal corners */
+  clip-path: polygon(
+    0% 0%, 
+    100% 0%, 
+    100% calc(100% - 16px), 
+    calc(100% - 16px) 100%, 
+    0% 100%
+  );
+  transition: clip-path 0.75s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.5s ease;
+  will-change: clip-path, transform;
+}
+
+.clip-path-card.active,
+.clip-path-card:hover {
+  /* Active / Hover state: Expands the cut smoothly, creating the high-end architectural sliding edge */
+  clip-path: polygon(
+    0% 0%, 
+    100% 0%, 
+    100% calc(100% - 36px), 
+    calc(100% - 36px) 100%, 
+    0% 100%
+  );
+}
+
+/* Sliding door shutter reveal effect */
+.sliding-door-curtain {
+  transform: scaleY(1);
+  transform-origin: top;
+  transition: transform 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+
+.group:hover .sliding-door-curtain,
+.card-revealed .sliding-door-curtain {
+  transform: scaleY(0);
+}
+
+/* LAYER 7: Backdrop Filter (Blur/Glassmorphism - Frosted Glass) */
+.card,
+.card-glass {
+  position: relative;
+  isolation: isolate;
+}
+
+.card::before,
+.card-glass::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: backdrop-filter 0.6s ease-out, -webkit-backdrop-filter 0.6s ease-out;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+.card.active::before,
+.card:hover::before,
+.card-glass.active::before,
+.card-glass:hover::before {
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+}
+
+
+
+#shape {
+  transition: d 0.8s ease-out;
+  will-change: d;
+}
