@@ -92,17 +92,33 @@ export const UnifiedQuantumBlockchainCanvas: React.FC<UnifiedQuantumBlockchainCa
 
     setupCanvasSize();
 
-    let isDocumentVisible = true;
+    let isDocumentVisible = !document.hidden;
+    const scheduleRender = () => {
+      if (isDocumentVisible && animRef.current === null) {
+        animRef.current = requestAnimationFrame(render);
+      }
+    };
     const handleVisibility = () => {
       isDocumentVisible = !document.hidden;
+      if (!isDocumentVisible && animRef.current !== null) {
+        cancelAnimationFrame(animRef.current);
+        animRef.current = null;
+      } else if (isDocumentVisible) {
+        scheduleRender();
+      }
+    };
+    const handleScroll = () => {
+      if (!autoRotate) scheduleRender();
     };
     document.addEventListener('visibilitychange', handleVisibility);
 
     const handleResize = () => {
       setupCanvasSize();
+      scheduleRender();
     };
 
     window.addEventListener('resize', handleResize);
+    window.addEventListener('scroll', handleScroll, { passive: true });
 
     // Preload Ultra-Photorealistic Architectural Sky & Tower Plates
     const bgSkylineImg = new Image();
@@ -298,7 +314,7 @@ export const UnifiedQuantumBlockchainCanvas: React.FC<UnifiedQuantumBlockchainCa
 
     const render = () => {
       if (!isDocumentVisible) {
-        animRef.current = requestAnimationFrame(render);
+        animRef.current = null;
         return;
       }
 
@@ -827,15 +843,17 @@ export const UnifiedQuantumBlockchainCanvas: React.FC<UnifiedQuantumBlockchainCa
 
       ctx.restore();
 
-      animRef.current = requestAnimationFrame(render);
+      animRef.current = autoRotate ? requestAnimationFrame(render) : null;
     };
 
-    animRef.current = requestAnimationFrame(render);
+    scheduleRender();
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility);
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('scroll', handleScroll);
       if (animRef.current) cancelAnimationFrame(animRef.current);
+      animRef.current = null;
     };
   }, [towerRotation, autoRotate, scrollProgressRef]);
 

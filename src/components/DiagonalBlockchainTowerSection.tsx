@@ -81,7 +81,169 @@ export const DiagonalBlockchainTowerSection: React.FC<DiagonalBlockchainTowerSec
   const sectionRef = useRef<HTMLElement | null>(null);
   const cardRefs = useRef<Array<HTMLElement | null>>([]);
   const progressRef = useRef<HTMLDivElement | null>(null);
+  const shaderCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const shaderPointerRef = useRef<{
+    move: (x: number, y: number, accent: string) => void;
+    leave: () => void;
+  } | null>(null);
   const [activePreview, setActivePreview] = useState<string | null>(null);
+
+  useLayoutEffect(() => {
+    const section = sectionRef.current;
+    const canvas = shaderCanvasRef.current;
+    if (!section || !canvas || isLowEndDevice() || window.matchMedia('(pointer: coarse)').matches) return;
+
+    let cancelled = false;
+    let cleanupRenderer: (() => void) | null = null;
+
+    const initializeRenderer = async () => {
+      const [THREE, { EffectComposer }, { RenderPass }, { UnrealBloomPass }] = await Promise.all([
+        import('three'),
+        import('three/addons/postprocessing/EffectComposer.js'),
+        import('three/addons/postprocessing/RenderPass.js'),
+        import('three/addons/postprocessing/UnrealBloomPass.js'),
+      ]);
+      if (cancelled) return;
+
+      let renderer: import('three').WebGLRenderer;
+      try {
+        renderer = new THREE.WebGLRenderer({
+          canvas,
+          alpha: true,
+          antialias: false,
+          powerPreference: 'low-power',
+        });
+      } catch {
+        return;
+      }
+
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+      renderer.setClearColor(0x000000, 0);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+      const uniforms = {
+        uPointer: { value: new THREE.Vector2(0.5, 0.5) },
+        uResolution: { value: new THREE.Vector2(1, 1) },
+        uColor: { value: new THREE.Color('#35e6f2') },
+        uTime: { value: 0 },
+        uStrength: { value: 0 },
+      };
+      const scene = new THREE.Scene();
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 2);
+      camera.position.z = 1;
+      const material = new THREE.ShaderMaterial({
+        uniforms,
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        vertexShader: `
+          varying vec2 vUv;
+          void main() {
+            vUv = uv;
+            gl_Position = vec4(position.xy, 0.0, 1.0);
+          }
+        `,
+        fragmentShader: `
+          precision highp float;
+          varying vec2 vUv;
+          uniform vec2 uPointer;
+          uniform vec2 uResolution;
+          uniform vec3 uColor;
+          uniform float uTime;
+          uniform float uStrength;
+
+          void main() {
+            vec2 delta = vUv - uPointer;
+            delta.x *= uResolution.x / uResolution.y;
+            float distanceToPointer = length(delta);
+            float angle = atan(delta.y, delta.x);
+            float ripple = sin(angle * 5.0 + uTime * 0.65) * 0.008;
+            float ring = 1.0 - smoothstep(0.003, 0.018, abs(distanceToPointer - 0.14 - ripple));
+            float glow = exp(-distanceToPointer * 9.0) * 0.42;
+            float filament = exp(-abs(sin(distanceToPointer * 68.0 - uTime * 1.4)) * 10.0) * exp(-distanceToPointer * 5.0) * 0.12;
+            float energy = (glow + ring * 0.24 + filament) * uStrength;
+            vec3 color = uColor * energy;
+            color += vec3(0.16, 0.48, 0.72) * ring * uStrength * 0.12;
+            gl_FragColor = vec4(color, energy * 0.72);
+          }
+        `,
+      });
+      const geometry = new THREE.PlaneGeometry(2, 2);
+      scene.add(new THREE.Mesh(geometry, material));
+      const composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      composer.addPass(new UnrealBloomPass(new THREE.Vector2(1, 1), 0.65, 0.7, 0.18));
+
+      const resize = () => {
+        const bounds = section.getBoundingClientRect();
+        composer.setSize(bounds.width, bounds.height);
+        uniforms.uResolution.value.set(bounds.width, bounds.height);
+      };
+      resize();
+
+      let frameId = 0;
+      let targetStrength = 0;
+      let previousTime = performance.now();
+      const render = (now: number) => {
+        const delta = Math.min((now - previousTime) / 1000, 0.05);
+        previousTime = now;
+        uniforms.uTime.value += delta;
+        uniforms.uStrength.value += (targetStrength - uniforms.uStrength.value) * 0.35;
+        composer.render();
+
+        if (Math.abs(targetStrength - uniforms.uStrength.value) > 0.01) {
+          frameId = requestAnimationFrame(render);
+        } else {
+          uniforms.uStrength.value = targetStrength;
+          frameId = 0;
+        }
+      };
+      const wakeRenderer = () => {
+        if (!frameId) {
+          previousTime = performance.now();
+          frameId = requestAnimationFrame(render);
+        }
+      };
+
+      shaderPointerRef.current = {
+        move: (x, y, accent) => {
+          uniforms.uPointer.value.set(x, 1 - y);
+          uniforms.uColor.value.set(accent);
+          targetStrength = 1;
+          wakeRenderer();
+        },
+        leave: () => {
+          targetStrength = 0;
+          wakeRenderer();
+        },
+      };
+
+      const resizeObserver = new ResizeObserver(resize);
+      resizeObserver.observe(section);
+      cleanupRenderer = () => {
+        shaderPointerRef.current = null;
+        resizeObserver.disconnect();
+        if (frameId) cancelAnimationFrame(frameId);
+        geometry.dispose();
+        material.dispose();
+        composer.dispose();
+        renderer.dispose();
+      };
+    };
+
+    const observer = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) return;
+      observer.disconnect();
+      void initializeRenderer();
+    }, { rootMargin: '200px 0px' });
+    observer.observe(section);
+
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      cleanupRenderer?.();
+    };
+  }, []);
 
   useLayoutEffect(() => {
     const section = sectionRef.current;
@@ -117,7 +279,9 @@ export const DiagonalBlockchainTowerSection: React.FC<DiagonalBlockchainTowerSec
           {
             xPercent: -50,
             yPercent: -50,
-            x: () => index === 0 ? window.innerWidth * 0.13 : window.innerWidth * 0.42,
+            x: () => index === 0
+              ? (window.innerWidth < 640 ? 0 : window.innerWidth * 0.13)
+              : window.innerWidth * 0.42,
             y: () => index === 0 ? window.innerHeight * 0.1 : window.innerHeight * 0.56,
             scale: index === 0 ? 0.94 : 0.68,
             rotateY: index === 0 ? -12 : -28,
@@ -172,6 +336,11 @@ export const DiagonalBlockchainTowerSection: React.FC<DiagonalBlockchainTowerSec
     >
       <div className="pointer-events-none absolute inset-0 z-[1] bg-[radial-gradient(ellipse_at_50%_54%,rgba(3,12,27,0.02)_10%,rgba(2,5,12,0.28)_72%,rgba(2,4,9,0.58)_100%)]" />
       <div className="pointer-events-none absolute inset-0 z-[1] bg-gradient-to-b from-[#02050b]/25 via-transparent to-[#02050b]/40" />
+      <canvas
+        ref={shaderCanvasRef}
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-[2] h-full w-full mix-blend-screen"
+      />
 
       <header className="absolute inset-x-0 top-0 z-30 flex items-start justify-between px-5 pt-6 sm:px-10 sm:pt-9 lg:px-16">
         <div>
@@ -191,7 +360,7 @@ export const DiagonalBlockchainTowerSection: React.FC<DiagonalBlockchainTowerSec
         </button>
       </header>
 
-      <div className="pointer-events-none absolute inset-0 z-[2] [perspective:1400px]">
+      <div className="pointer-events-none absolute inset-0 z-[3] [perspective:1400px]">
         {PROJECTS.map((project, index) => {
           const isPreviewActive = activePreview === project.url;
 
@@ -201,13 +370,38 @@ export const DiagonalBlockchainTowerSection: React.FC<DiagonalBlockchainTowerSec
               ref={(element) => {
                 cardRefs.current[index] = element;
               }}
-              className="group pointer-events-auto absolute left-1/2 top-1/2 w-[min(86vw,390px)] overflow-hidden rounded-[18px] border border-cyan-200/25 bg-[#06101d]/80 p-3.5 shadow-[0_20px_90px_rgba(0,0,0,0.48),inset_0_1px_0_rgba(255,255,255,0.1)] backdrop-blur-xl sm:w-[420px] sm:rounded-[20px] sm:p-4"
+              className="group pointer-events-auto absolute left-1/2 top-1/2 w-[min(88vw,520px)] overflow-hidden rounded-[22px] border border-white/15 bg-[#06101d]/85 p-4 shadow-[0_28px_100px_rgba(0,0,0,0.56),inset_0_1px_0_rgba(255,255,255,0.12)] backdrop-blur-xl sm:rounded-[26px] sm:p-5"
+              onPointerMove={(event) => {
+                if (event.pointerType === 'touch') return;
+                const bounds = event.currentTarget.getBoundingClientRect();
+                const x = (event.clientX - bounds.left) / bounds.width;
+                const y = (event.clientY - bounds.top) / bounds.height;
+                const normalizedX = (x - 0.5) * 2;
+                const normalizedY = (y - 0.5) * 2;
+                event.currentTarget.style.setProperty('--card-tilt-x', `${normalizedX * 3.5}deg`);
+                event.currentTarget.style.setProperty('--card-tilt-y', `${normalizedY * -3.5}deg`);
+
+                const sectionBounds = sectionRef.current?.getBoundingClientRect();
+                if (sectionBounds) {
+                  shaderPointerRef.current?.move(
+                    (event.clientX - sectionBounds.left) / sectionBounds.width,
+                    (event.clientY - sectionBounds.top) / sectionBounds.height,
+                    project.accent,
+                  );
+                }
+              }}
+              onPointerLeave={(event) => {
+                event.currentTarget.style.setProperty('--card-tilt-x', '0deg');
+                event.currentTarget.style.setProperty('--card-tilt-y', '0deg');
+                shaderPointerRef.current?.leave();
+              }}
               style={{
                 transformStyle: 'preserve-3d',
-                boxShadow: `0 24px 80px rgba(0,0,0,0.5), 0 0 36px ${project.accent}16, inset 0 1px 0 rgba(255,255,255,0.12)`,
+                boxShadow: `0 28px 100px rgba(0,0,0,0.56), 0 0 48px ${project.accent}20, inset 0 1px 0 rgba(255,255,255,0.12)`,
               }}
             >
-              <div className="mb-2.5 flex items-center justify-between">
+              <div className="project-card-shell">
+              <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="rounded border border-white/10 bg-black/25 px-2 py-1 font-mono text-[8px] tracking-[0.2em] text-white/70">
                     PISO #{project.id}
@@ -219,7 +413,7 @@ export const DiagonalBlockchainTowerSection: React.FC<DiagonalBlockchainTowerSec
                 <span className="size-1.5 rounded-full" style={{ backgroundColor: project.accent, boxShadow: `0 0 10px ${project.accent}` }} />
               </div>
 
-              <div className="relative mb-3 h-[100px] overflow-hidden rounded-lg border border-white/10 bg-[#020811] sm:h-[112px]">
+              <div className="relative mb-4 h-[clamp(170px,26svh,230px)] overflow-hidden rounded-xl border border-white/12 bg-[#020811] shadow-[inset_0_0_30px_rgba(0,0,0,0.5)] sm:rounded-2xl">
                 {isPreviewActive ? (
                   <>
                     <div className="absolute inset-x-0 top-0 z-20 flex h-6 items-center gap-1 border-b border-white/10 bg-[#09121e]/95 px-2">
@@ -256,7 +450,7 @@ export const DiagonalBlockchainTowerSection: React.FC<DiagonalBlockchainTowerSec
                     type="button"
                     onClick={() => setActivePreview(project.url)}
                     aria-label={`Reproducir vista previa de ${project.client}`}
-                    className="absolute inset-0 flex w-full items-center justify-between overflow-hidden px-4 text-left"
+                    className="absolute inset-0 flex w-full items-center justify-between overflow-hidden px-5 text-left sm:px-7"
                   >
                     <div
                       className="pointer-events-none absolute inset-0 opacity-80"
@@ -264,27 +458,28 @@ export const DiagonalBlockchainTowerSection: React.FC<DiagonalBlockchainTowerSec
                         background: `radial-gradient(ellipse at 78% 45%, ${project.accent}26, transparent 44%), linear-gradient(120deg, transparent 45%, ${project.accent}18 46%, transparent 47%)`,
                       }}
                     />
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#020811]/70 via-transparent to-transparent" />
                     <div className="relative">
-                      <span className="mb-1 block font-mono text-[8px] tracking-[0.24em] text-white/40">RECORRIDO DEL SITIO</span>
-                      <span className="block font-syne text-sm font-semibold tracking-wide text-white/80 sm:text-base">Vista previa</span>
-                      <span className="mt-1 block font-mono text-[8px] text-white/40">PRESIONÁ PARA REPRODUCIR</span>
+                      <span className="mb-2 block font-mono text-[9px] tracking-[0.24em] text-white/45">RECORRIDO DEL SITIO</span>
+                      <span className="block max-w-[260px] font-syne text-xl font-semibold leading-tight tracking-wide text-white sm:text-2xl">Una mirada en movimiento.</span>
+                      <span className="mt-3 block font-mono text-[8px] tracking-[0.18em] text-white/45">PRESIONÁ PARA REPRODUCIR</span>
                     </div>
                     <span
-                      className="relative flex size-9 shrink-0 items-center justify-center rounded-full border border-white/20 bg-white/[0.06] text-white/85 transition-transform group-hover:scale-110"
+                      className="relative flex size-12 shrink-0 items-center justify-center rounded-full border border-white/25 bg-white/[0.08] text-white/90 shadow-[0_0_36px_rgba(255,255,255,0.12)] backdrop-blur-md transition-transform duration-500 group-hover:scale-110"
                       style={{ boxShadow: `0 0 24px ${project.accent}22` }}
                     >
-                      <Play size={13} fill="currentColor" className="ml-0.5" />
+                      <Play size={16} fill="currentColor" className="ml-0.5" />
                     </span>
                   </button>
                 )}
               </div>
 
-              <div className="flex items-end justify-between gap-3">
+              <div className="flex items-end justify-between gap-3 border-t border-white/10 pt-4">
                 <div className="min-w-0">
-                  <h3 className="truncate font-syne text-[17px] font-extrabold leading-tight tracking-wide text-white sm:text-[19px]">
+                  <h3 className="truncate font-syne text-base font-extrabold leading-tight tracking-wide text-white sm:text-xl">
                     {project.name}
                   </h3>
-                  <p className="mt-1 truncate text-[10px] leading-4 text-slate-300/65 sm:text-[11px]">
+                  <p className="mt-1 truncate text-[11px] leading-4 text-slate-300/65 sm:text-xs">
                     {project.description}
                   </p>
                 </div>
@@ -296,6 +491,7 @@ export const DiagonalBlockchainTowerSection: React.FC<DiagonalBlockchainTowerSec
                 >
                   VER SITIO <ExternalLink className="ml-1 inline" size={9} />
                 </a>
+              </div>
               </div>
             </article>
           );
